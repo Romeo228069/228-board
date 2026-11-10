@@ -37,7 +37,7 @@ export function svgFile(strokes, w, hh) { return `<svg xmlns="http://www.w3.org/
 
 /* Zeichenfläche. opts: {host, w, h, strokes, bg(img url), toWorld(evt)->[x,y], onDone(strokes|null)} */
 export function openPad(opts) {
-  let strokes = structuredClone(opts.strokes || []), tool = 'pen', color = A.setting('penColor', '#1c1c1e'), prev = '#ff453a', size = A.setting('penSize', 1), curr = null, sel = new Set(), moving = null, redoS = [];
+  let strokes = structuredClone(opts.strokes || []), tool = 'pen', color = A.setting('penColor', opts.toWorld && getComputedStyle(document.documentElement).colorScheme === 'dark' ? '#ffffff' : '#1c1c1e'), prev = '#ff453a', size = A.setting('penSize', 1), curr = null, sel = new Set(), moving = null, redoS = [];
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'pad-svg'); if (opts.w) { svg.setAttribute('viewBox', `0 0 ${opts.w} ${opts.h}`); }
   const pt = e => { if (opts.toWorld) return opts.toWorld(e); const r = svg.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * opts.w, (e.clientY - r.top) / r.height * opts.h]; };

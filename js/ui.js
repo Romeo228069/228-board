@@ -321,12 +321,13 @@ A.sketchEdit = id => { const e = get(id); const host = h('div.skpad', { style: {
 /* ---------- Bildsuche ---------- */
 A.imageSearch = () => { const inp = h('input.field.big', { placeholder: 'Fotos suchen …' }), grid = h('div.igrid'), more = h('button.btn.wide', { hidden: true }, 'Mehr laden'); let page = 1, q = '';
   const sugg = () => { const words = kids(A.board).map(e => e.title || textOf(e.html || '')).join(' ').toLowerCase().match(/[a-zäöüß]{5,}/g) || []; return [...new Set([get(A.board).title, ...words].filter(Boolean))].slice(0, 6); };
-  const run = async reset => { if (reset) { page = 1; grid.innerHTML = ''; } q = inp.value.trim(); if (!q) return; more.hidden = true; grid.classList.add('busy');
+  const run = async reset => { if (reset) { page = 1; grid.innerHTML = ''; } q = inp.value.trim(); if (!q) return; more.hidden = true; grid.classList.add('busy'); const wait_ = h('p.mut.pad.loading', 'Suche läuft …'); grid.append(wait_);
     try { const key = A.setting('pexelsKey', ''); let items;
       if (key) { const r = await fetch(`https://api.pexels.com/v1/search?per_page=30&page=${page}&query=${encodeURIComponent(q)}`, { headers: { Authorization: key } }); items = ((await r.json()).photos || []).map(p => ({ thumb: p.src.medium, full: p.src.large2x, by: p.photographer, src: p.url })); }
       else { const r = await fetch(`https://api.openverse.org/v1/images/?page_size=20&page=${page}&q=${encodeURIComponent(q)}`); items = ((await r.json()).results || []).map(p => ({ thumb: p.thumbnail || p.url, full: p.url, by: p.creator, src: p.foreign_landing_url })); }
+      wait_.remove();
       items.forEach(it => grid.append(h('button.ires', { title: it.by ? 'Foto: ' + it.by : '', onclick: async e => { e.currentTarget.classList.add('busy'); let src = it.full; try { const b = await (await fetch(it.full)).blob(); if (/^image\//.test(b.type)) src = await putBlob(b); } catch {} A.create('image', null, { src, caption: it.by ? 'Foto: ' + it.by : '', srcUrl: it.src }, { quiet: true }); A.toast('Bild hinzugefügt'); e.target.closest('.ires')?.classList.remove('busy'); } }, h('img', { src: it.thumb, loading: 'lazy', alt: '' }))));
-      more.hidden = items.length < 20; if (!items.length && page === 1) grid.append(h('p.mut.pad', 'Keine Bilder gefunden')); } catch { grid.append(h('p.mut.pad', 'Die Bildsuche ist gerade nicht erreichbar.')); }
+      more.hidden = items.length < 20; if (!items.length && page === 1) grid.append(h('p.mut.pad', 'Keine Bilder gefunden')); } catch { wait_.remove(); grid.append(h('p.mut.pad', 'Die Bildsuche ist gerade nicht erreichbar.')); }
     grid.classList.remove('busy'); };
   inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') run(true); }); more.onclick = () => { page++; run(); };
   A.modal('Bildsuche', h('div.search', inp, h('div.row.wrap', sugg().map(s => h('button.chipb', { onclick: () => { inp.value = s; run(true); } }, s))), grid, more, h('p.mut.small', A.setting('pexelsKey', '') ? 'Fotos von Pexels' : 'Frei lizenzierte Fotos über Openverse. Für Pexels einen API-Schlüssel in den Einstellungen eintragen.')), { cls: 'side' }); inp.focus(); };

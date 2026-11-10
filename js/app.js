@@ -65,7 +65,7 @@ function reconcile(container, els, abs) {
   let prev = null;
   for (const el of els) {
     let n = have.get(el.id); have.delete(el.id);
-    if (!n || (n._m !== sig(el) && !(A.editing && n.contains(A.editing) && !n._force))) { const nn = build(el); if (n) n.replaceWith(nn); n = nn; }
+    if (!n || n._force || (n._m !== sig(el) && !(A.editing && n.contains(A.editing)))) { const nn = build(el); if (n) n.replaceWith(nn); n = nn; }
     if (abs) { n.style.left = (el.x || 0) + 'px'; n.style.top = (el.y || 0) + 'px'; n.style.zIndex = el.type === 'column' ? 0 : 1; } else { n.style.left = n.style.top = ''; }
     if (n.parentNode !== container || n.previousElementSibling !== prev) prev ? prev.after(n) : container.prepend(n);
     prev = n;
@@ -399,7 +399,7 @@ function lineDrop() {
 
 /* Doppelklick */
 function dbl(e) {
-  const t = e.target; if (A.pad || t.closest(NOD)) return;
+  const t = e.target?.closest ? e.target : document.elementFromPoint(e.clientX, e.clientY) || stage; if (A.pad || t.closest(NOD)) return;
   if (t.classList?.contains('lmid')) { const id = t.closest('g').dataset.id; return tx(() => set(id, { bend: null })); }
   if (t.classList?.contains('rz')) { const n = elOf(t), el = get(n.dataset.id); return tx(() => set(el.id, { w: DEF_W[el.type] })); }
   const ln = t.closest?.('g.ln'); if (ln && !A.readonly()) { const l = get(ln.dataset.id); if (l.label == null) { l.label = ''; drawLines(); } return A.startEdit(labels.querySelector(`[data-line="${l.id}"]`)); }
