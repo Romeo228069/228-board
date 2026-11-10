@@ -64,12 +64,12 @@ function attach(sid, data, link) {
     s.unsub = fs.onSnapshot(fs.collection(db, 'spaces', sid, 'els'), { includeMetadataChanges: false }, snap => {
       const map = new Map(), seen = new Set();
       snap.docChanges().forEach(c => { const id = c.doc.id; if (c.doc.metadata.hasPendingWrites) return;
-        if (c.type === 'removed') { if (Y.idx.get(id) === sid && get(id)) { map.set(id, null); Y.idx.delete(id); } return; }
-        const d = c.doc.data(); let el; try { el = JSON.parse(d.j); } catch { return; } const loc = get(id); Y.idx.set(id, sid);
+        if (c.type === 'removed') return;
+        const d = c.doc.data(), loc = get(id); if (d.del) { if (loc && (loc.modified || 0) <= (d.m || 0) && spaceOf(loc) === sid) { map.set(id, null); Y.idx.delete(id); } return; }
+        let el; try { el = JSON.parse(d.j); } catch { return; } Y.idx.set(id, sid);
         if (loc && (loc.modified || 0) >= (el.modified || 0)) return; map.set(id, el);
         if (!s.first && d.by !== Y.user?.uid && el.board === A.board) Y.act.set(id, `${d.name || 'Jemand'} hat das geändert`); });
-      if (s.first) { s.first = false; snap.docs.forEach(d => seen.add(d.id)); const last = kv('synced:' + sid, 0);
-        if (roleIn(sid) === 'edit') all().forEach(e => { if (seen.has(e.id) || spaceOf(e) !== sid) return; if (last && (e.modified || 0) < last && Y.idx.get(e.id) !== sid && !snap.metadata.fromCache) map.set(e.id, null); else enqueue(sid, e.id, e); });
+      if (s.first) { s.first = false; snap.docs.forEach(d => seen.add(d.id));         if (roleIn(sid) === 'edit') all().forEach(e => { if (seen.has(e.id) || spaceOf(e) !== sid) return; enqueue(sid, e.id, e); });
         kvSet('synced:' + sid, now()); res(); landAlias(sid); }
       if (map.size) { applyRemote(map); if (get(A.board) == null) A.openBoard('home'); }
     }, e => { console.warn('Bereich', sid, e.code); res(); if (e.code === 'permission-denied' && sid !== me()?.uid) { Y.spaces.delete(sid); A.toast('Kein Zugriff auf dieses Board'); } });
@@ -93,9 +93,10 @@ function onLocal(after) {
 }
 async function flush() {
   if (!queue.size || !Y.user) return; const items = [...queue.values()]; queue = new Map();
-  for (let i = 0; i < items.length; i += 300) { const b = fs.writeBatch(db);
-    for (const { sid, id, el } of items.slice(i, i + 300)) { const ref = fs.doc(db, 'spaces', sid, 'els', id); if (!el) b.delete(ref); else { b.set(ref, { j: JSON.stringify(el), m: el.modified || 0, t: el.type, by: Y.user.uid, name: A.me() }); pushBlobs(sid, el); } }
-    b.commit().catch(e => { console.warn('Schreiben abgelehnt', e.code); if (e.code === 'permission-denied') A.toast('Diese Änderung darfst du hier nicht speichern'); }); }
+  for (const { sid, id, el } of items) { const ref = fs.doc(db, 'spaces', sid, 'els', id);
+    const p = el ? fs.setDoc(ref, { j: JSON.stringify(el), m: el.modified || 0, t: el.type, by: Y.user.uid, name: A.me(), del: false }) : fs.setDoc(ref, { del: true, j: '', m: now(), by: Y.user.uid }, { merge: true });
+    if (el) pushBlobs(sid, el);
+    p.catch(e => { console.warn('Schreiben abgelehnt', id, e.code); if (e.code === 'permission-denied') A.toast('Diese Änderung darfst du hier nicht speichern'); else if (/invalid-argument|resource-exhausted/.test(e.code || '')) A.toast('Ein Element ist zu groß für den Abgleich und bleibt auf diesem Gerät'); }); }
 }
 async function pushBlobs(sid, el) { const done = kv('upl', {});
   for (const k of BLOB_KEYS) { const id = el[k]; if (!id || id[0] !== 'b' || /^(blob|data):/.test(id) || done[sid + id]) continue; done[sid + id] = 1; kvSet('upl', done);
@@ -155,7 +156,7 @@ function accountDialog() {
   const done = () => { A.closeModal(); A.toast('Angemeldet – deine Boards werden abgeglichen'); if (/#\/(j|v)\//.test(location.hash)) openRemote(location.hash); };
   const go = async reg => { msg.textContent = ''; try { await (reg ? fa.createUserWithEmailAndPassword : fa.signInWithEmailAndPassword)(auth, em.value.trim(), pw.value); if (reg) fa.sendEmailVerification(auth.currentUser).catch(() => {}); done(); } catch (e) { err(e); } };
   A.modal('Anmelden', h('div.settings', h('p', 'Mit einem Konto liegen deine Boards auf allen Geräten, und du kannst sie mit anderen teilen und gemeinsam bearbeiten.'), em, pw, msg,
-    h('div.row.wrap', h('button.btn.primary', { onclick: () => go(false) }, 'Anmelden'), h('button.btn', { onclick: () => go(true) }, 'Konto anlegen'), h('button.btn', { onclick: async () => { try { await fa.signInWithPopup(auth, new fa.GoogleAuthProvider()); done(); } catch (e) { err(e); } } }, 'Mit Google anmelden')),
+    h('div.row.wrap', h('button.btn.primary', { onclick: () => go(false) }, 'Anmelden'), h('button.btn', { onclick: () => go(true) }, 'Konto anlegen'), firebaseConfig.google ? h('button.btn', { onclick: async () => { try { await fa.signInWithPopup(auth, new fa.GoogleAuthProvider()); done(); } catch (e) { err(e); } } }, 'Mit Google anmelden') : null),
     h('button.link', { onclick: async () => { if (!em.value) return (msg.textContent = 'Bitte zuerst die E-Mail eintragen.'); try { await fa.sendPasswordResetEmail(auth, em.value.trim()); msg.textContent = 'E-Mail zum Zurücksetzen ist unterwegs.'; } catch (e) { err(e); } } }, 'Passwort vergessen?'),
     h('p.mut.small', 'Ohne Konto bleibt alles wie bisher nur auf diesem Gerät.')), { cls: 'small wide' });
 }
