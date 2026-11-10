@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>228 Board</title>
+<meta name="description" content="228 Board – Leinwand für Ideen, Moodboards, Drehpläne und Projekte.">
+<meta name="theme-color" content="#f2f2f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="228 Board">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+  <header id="top"></header>
+  <nav id="tools" class="glass" aria-label="Werkzeuge"></nav>
+  <main id="stage" aria-label="Leinwand">
+    <div id="world"><div id="cards"></div><svg id="lines" aria-hidden="true"></svg><div id="labels"></div></div>
+    <div id="marquee" hidden></div>
+  </main>
+  <aside id="unsorted" class="glass" hidden aria-label="Ablage"><div id="unsortedList"></div></aside>
+  <aside id="trash" class="glass" hidden aria-label="Papierkorb"></aside>
+  <button id="trashBtn" class="glass" title="Papierkorb" aria-label="Papierkorb"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+</div>
+<noscript>228 Board braucht JavaScript.</noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
