@@ -34,7 +34,7 @@ export async function initSync() {
   A.paintPeers = paintPeers;
   const people0 = A.people; A.people = () => { const sp = Y.spaces.get(spaceOf(get(A.board)))?.data; return [...new Set([...people0(), ...Object.values(sp?.names || {})])]; };
   const notify0 = A.notify; A.notify = (text, to, elId) => { notify0(text, to, elId); const sid = spaceOf(get(A.board)), sp = Y.spaces.get(sid)?.data; if (!me() || !sp) return; const targets = to ? Object.entries(sp.names || {}).filter(([, n]) => n === to).map(([e]) => e.replace(/․/g, '.')) : [...new Set([...(sp.editors || []), sp.ownerEmail])].filter(Boolean); targets.filter(e => e !== email()).forEach(e => fs.addDoc(fs.collection(db, 'inbox', e, 'items'), { text, ts: now(), board: A.board, el: elId || null, sid, from: A.me() }).catch(() => {})); };
-  const onBoard0 = A.onBoard; A.onBoard = b => { onBoard0?.(b); watchPresence(); b && [...Y.act.keys()].forEach(k => get(k)?.board === b.id && 0); };
+  const onBoard0 = A.onBoard; A.onBoard = b => { onBoard0?.(b); watchPresence(); if (authReady) setTimeout(() => ensure(b && spaceOf(b)), 400); };
   fa.onAuthStateChanged(auth, onUser);
   addEventListener('pagehide', () => { flush(); if (presSid && Y.user) fs.deleteDoc(fs.doc(db, 'spaces', presSid, 'presence', Y.user.uid)).catch(() => {}); });
   setInterval(() => { sendPresence(); const t = now() - 70e3; const n = Y.peers.length; Y.peers = Y.peers.filter(p => p.ts > t); if (n !== Y.peers.length) A.render(); }, 25e3);
@@ -49,12 +49,20 @@ async function onUser(u) {
     fs.setDoc(fs.doc(db, 'users', u_.uid), { name: nm, email: email() }, { merge: true }).catch(() => {});
     const own = sdoc(u_.uid); try { const d = await fs.getDoc(own); if (!d.exists()) await fs.setDoc(own, { owner: u_.uid, ownerEmail: email(), personal: true, editors: [], names: {} }); } catch (e) { console.warn(e); }
     attach(u_.uid, { owner: u_.uid, personal: true });
-    const watch = q => listUnsubs.push(fs.onSnapshot(q, snap => snap.docChanges().forEach(c => { const sid = c.doc.id; if (sid === u_.uid) return; if (c.type === 'removed') return detach(sid); const s = Y.spaces.get(sid); if (s) { s.data = c.doc.data(); A.render(); } else attach(sid, c.doc.data()); }), e => console.warn('Liste', e)));
+    const watch = q => listUnsubs.push(fs.onSnapshot(q, snap => snap.docChanges().forEach(c => { const sid = c.doc.id; if (sid === u_.uid || c.doc.metadata.hasPendingWrites) return; if (c.type === 'removed') return detach(sid); const s = Y.spaces.get(sid); if (s) { s.data = c.doc.data(); A.render(); } else attach(sid, c.doc.data()); }), e => console.warn('Liste', e)));
     watch(fs.query(fs.collection(db, 'spaces'), fs.where('owner', '==', u_.uid)));
     watch(fs.query(fs.collection(db, 'spaces'), fs.where('editors', 'array-contains', email())));
     inboxUnsub = fs.onSnapshot(fs.collection(db, 'inbox', email(), 'items'), snap => { const list = kv('notifs', []); let n = 0; snap.docChanges().forEach(c => { if (c.type !== 'added' || list.some(x => x.id === c.doc.id)) return; const d = c.doc.data(); list.unshift({ id: c.doc.id, text: d.text, ts: d.ts, board: d.board, el: d.el, read: false }); n++; if (d.ts > now() - 60e3) { A.toast(d.text); if (window.Notification?.permission === 'granted') new Notification('228 Board', { body: d.text }); } }); if (n) { kvSet('notifs', list.sort((a, b) => b.ts - a.ts).slice(0, 100)); A.render(); } }, () => {});
   }
   A.role = A.roleFor(A.board); A.render();
+  authReady = true; setTimeout(() => ensure(get(A.board) && spaceOf(get(A.board))), 2500);
+}
+// Ein lokal zwischengespeichertes fremdes Board nur zeigen, solange der Zugriff noch besteht
+let authReady = false; const ensuring = new Set();
+async function ensure(sid) {
+  if (!sid || sid === me()?.uid || Y.spaces.has(sid) || ensuring.has(sid) || !get(sid)?.space) return; ensuring.add(sid);
+  const ok = await openRemote('#/v/' + sid, true); ensuring.delete(sid); if (ok !== false || !navigator.onLine) return; // nur bei eindeutig entzogenem Zugriff aufräumen, nie bei Netzproblemen
+  const gone = all().filter(e => spaceOf(e) === sid).map(e => e.id); if (gone.length) applyRemote(new Map(gone.map(i => [i, null]))); if (!get(A.board)) A.openBoard('home');
 }
 function detach(sid) { const s = Y.spaces.get(sid); if (!s) return; s.unsub?.(); s.unsubRx?.(); Y.spaces.delete(sid); const ids = all().filter(e => Y.idx.get(e.id) === sid).map(e => e.id); if (ids.length) { applyRemote(new Map(ids.map(i => [i, null]))); ids.forEach(i => Y.idx.delete(i)); } if (get(A.board) == null) A.openBoard('home'); }
 function attach(sid, data, link) {
@@ -63,14 +71,14 @@ function attach(sid, data, link) {
   s.ready = new Promise(res => {
     s.unsub = fs.onSnapshot(fs.collection(db, 'spaces', sid, 'els'), { includeMetadataChanges: false }, snap => {
       const map = new Map(), seen = new Set();
-      snap.docChanges().forEach(c => { const id = c.doc.id; if (c.doc.metadata.hasPendingWrites) return;
+      snap.docChanges().forEach(c => { const id = c.doc.id; if (c.doc.metadata.hasPendingWrites) { if (!c.doc.data().del) Y.idx.set(id, sid); return; }
         if (c.type === 'removed') return;
         const d = c.doc.data(), loc = get(id); if (d.del) { if (loc && (loc.modified || 0) <= (d.m || 0) && spaceOf(loc) === sid) { map.set(id, null); Y.idx.delete(id); } return; }
         let el; try { el = JSON.parse(d.j); } catch { return; } Y.idx.set(id, sid);
         if (loc && (loc.modified || 0) >= (el.modified || 0)) return; map.set(id, el);
         if (!s.first && d.by !== Y.user?.uid && el.board === A.board) Y.act.set(id, `${d.name || 'Jemand'} hat das geändert`); });
-      if (s.first) { s.first = false; snap.docs.forEach(d => seen.add(d.id));         if (roleIn(sid) === 'edit') all().forEach(e => { if (seen.has(e.id) || spaceOf(e) !== sid) return; enqueue(sid, e.id, e); });
-        kvSet('synced:' + sid, now()); res(); landAlias(sid); }
+      if (s.first) { s.first = false; snap.docs.forEach(d => seen.add(d.id));         if (roleIn(sid) === 'edit') all().forEach(e => { if (seen.has(e.id) || spaceOf(e) !== sid) return; Y.idx.set(e.id, sid); enqueue(sid, e.id, e); });
+        kvSet('synced:' + sid, now()); res(); landAlias(sid); if (get(A.board) && spaceOf(get(A.board)) === sid) watchPresence(); }
       if (map.size) { applyRemote(map); if (get(A.board) == null) A.openBoard('home'); }
     }, e => { console.warn('Bereich', sid, e.code); res(); if (e.code === 'permission-denied' && sid !== me()?.uid) { Y.spaces.delete(sid); A.toast('Kein Zugriff auf dieses Board'); } });
     s.unsubRx = fs.onSnapshot(fs.collection(db, 'spaces', sid, 'rx'), snap => { for (const [k, v] of Y.rx) Y.rx.set(k, v.filter(x => x.sid !== sid)); snap.docs.forEach(d => { const x = { ...d.data(), sid }; Y.rx.set(x.el, [...(Y.rx.get(x.el) || []), x]); }); $('#cards').innerHTML = ''; A.render(); }, () => {});
@@ -96,7 +104,7 @@ async function flush() {
   for (const { sid, id, el } of items) { const ref = fs.doc(db, 'spaces', sid, 'els', id);
     const p = el ? fs.setDoc(ref, { j: JSON.stringify(el), m: el.modified || 0, t: el.type, by: Y.user.uid, name: A.me(), del: false }) : fs.setDoc(ref, { del: true, j: '', m: now(), by: Y.user.uid }, { merge: true });
     if (el) pushBlobs(sid, el);
-    p.catch(e => { console.warn('Schreiben abgelehnt', id, e.code); if (e.code === 'permission-denied') A.toast('Diese Änderung darfst du hier nicht speichern'); else if (/invalid-argument|resource-exhausted/.test(e.code || '')) A.toast('Ein Element ist zu groß für den Abgleich und bleibt auf diesem Gerät'); }); }
+    p.catch(e => { console.warn('Schreiben abgelehnt', id, e.code); if (e.code === 'permission-denied') { A.toast('Diese Änderung darfst du hier nicht speichern'); fs.getDocFromServer(ref).then(d => applyRemote(new Map([[id, d.exists() && !d.data().del ? JSON.parse(d.data().j) : null]]))).catch(() => {}); } else if (/invalid-argument|resource-exhausted/.test(e.code || '')) A.toast('Ein Element ist zu groß für den Abgleich und bleibt auf diesem Gerät'); }); }
 }
 async function pushBlobs(sid, el) { const done = kv('upl', {});
   for (const k of BLOB_KEYS) { const id = el[k]; if (!id || id[0] !== 'b' || /^(blob|data):/.test(id) || done[sid + id]) continue; done[sid + id] = 1; kvSet('upl', done);
@@ -126,16 +134,17 @@ function paintPeers() { document.querySelectorAll('.peer').forEach(n => { n.clas
   const s = A.board + [...A.sel].join(); if (s !== lastSel) { lastSel = s; sendPresence(); A.sel.forEach(id => Y.act.delete(id)); } }
 
 /* ---------- Geteilte Links öffnen ---------- */
-async function openRemote(hash) {
+async function openRemote(hash, quiet) {
   const m = /#\/(b|v|j)\/([\w-]+)(?:\/([\w-]+))?/.exec(hash); if (!m) return false; const [, kind, sid, token] = m;
   if (!Y.user) { if (kind === 'j') { A.toast('Bitte zuerst anmelden, um die Einladung anzunehmen'); accountDialog(); return false; } try { await fa.signInAnonymously(auth); } catch (e) { A.toast('Zum Ansehen bitte anmelden'); accountDialog(); return false; } }
-  let sp; try { sp = (await fs.getDoc(sdoc(sid))).data(); } catch { } if (!sp) { A.toast('Dieses Board gibt es nicht oder es ist nicht freigegeben'); return false; }
+  let sp; try { sp = (await fs.getDocFromServer(sdoc(sid))).data(); } catch (e) { if (e.code !== 'permission-denied') return null; } if (!sp) { A.toast('Dieses Board gibt es nicht oder es ist nicht freigegeben'); return false; }
   const member = sp.owner === Y.user.uid || (email() && (sp.editors || []).includes(email()));
   if (kind === 'j' && !member) { if (!me()) { A.toast('Bitte zuerst anmelden, um die Einladung anzunehmen'); accountDialog(); return false; }
     try { await fs.setDoc(fs.doc(db, 'spaces', sid, 'join', Y.user.uid), { t: token }); await fs.updateDoc(sdoc(sid), { editors: fs.arrayUnion(email()), ['names.' + email().replace(/\./g, '․')]: A.me() }); sp = (await fs.getDoc(sdoc(sid))).data(); } catch (e) { A.toast('Dieser Einladungslink ist nicht mehr gültig'); return false; } }
   else if (!member) { if (!sp.view) { A.toast('Dieses Board ist nicht freigegeben'); return false; }
     if (sp.pw) { const ok = await new Promise(res => A.prompt('Passwort für dieses Board', '', async v => { if (!v) return res(false); try { await fs.setDoc(fs.doc(db, 'spaces', sid, 'pass', Y.user.uid), { h: await sha(v + sid) }); res(true); } catch { A.toast('Das Passwort stimmt nicht'); res(false); } }, { type: 'password', ok: 'Öffnen' })); if (!ok) return false; } }
   await attach(sid, sp, !member); if (!get(sid)) { A.toast('Das Board konnte nicht geladen werden'); return false; }
+  if (quiet) { A.role = A.roleFor(A.board); watchPresence(); A.render(); return true; }
   A.openBoard(sid); if (!member && sp.welcome) A.toast(sp.welcome);
   if (!member && me()) A.toast('Geteiltes Board', 'Auf Start sichern', () => { landAliasForce(sid); });
   return true;
@@ -165,7 +174,7 @@ async function shareBoard(id) { // Board in einen eigenen, teilbaren Bereich leg
   await fs.setDoc(fs.doc(db, 'spaces', id, 'private', 'cfg'), { editToken: null, pwHash: null });
   Y.spaces.set(id, { data: (await fs.getDoc(sdoc(id))).data(), first: false, ready: Promise.resolve() }); const s = Y.spaces.get(id);
   tx(() => { add({ id: uid(), type: 'board', alias: id, board: b.board, loc: b.loc, col: b.col || null, ord: b.ord, x: b.x, y: b.y, z: b.z }); set(id, { space: id, board: null, loc: 'root', col: null }); }, { undo: false });
-  await flush(); Y.spaces.delete(id); attach(id, s.data);
+  await flush(); Y.spaces.delete(id); attach(id, s.data); A.role = 'edit'; watchPresence();
 }
 async function shareDialog() {
   if (!me()) { A.toast('Zum Teilen bitte anmelden'); return accountDialog(); }

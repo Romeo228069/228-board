@@ -86,7 +86,7 @@ A.render = function render() {
   drawLines(); A.paintPeers?.(); refreshUI();
 };
 A.rebuild = (id, focus) => { const n = node(id); if (n) n._force = true; if (A.editing && n?.contains(A.editing)) { const ed = A.editing; A.editing = null; ed._commit?.(ed); } A.render(); if (focus) { const t = node(id)?.querySelector(focus.sel); if (t) A.startEdit(t, null, focus.pos); } };
-A.select = (ids, add) => { if (!add) A.sel.clear(); ids.forEach(i => A.sel.add(i)); if (table.T.id && !A.sel.has(table.T.id)) table.clearSel(); $$('.el.sel').forEach(n => !A.sel.has(n.dataset.id) && n.classList.remove('sel')); A.sel.forEach(id => $$(`.el[data-id="${id}"]`).forEach(n => n.classList.add('sel'))); drawLines(); refreshUI(); };
+A.select = (ids, add) => { if (!add) A.sel.clear(); ids.forEach(i => A.sel.add(i)); if (table.T.id && !A.sel.has(table.T.id)) table.clearSel(); $$('.el.sel').forEach(n => !A.sel.has(n.dataset.id) && n.classList.remove('sel')); A.sel.forEach(id => $$(`.el[data-id="${id}"]`).forEach(n => n.classList.add('sel'))); drawLines(); A.paintPeers?.(); refreshUI(); };
 A.selEls = () => [...A.sel].map(get).filter(Boolean);
 
 /* Linien */
