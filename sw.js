@@ -1,6 +1,6 @@
 // Offline-Hülle: App-Dateien sofort aus dem Speicher, im Hintergrund aktualisieren
-const V = 'board228-v1';
-const SHELL = ['./', 'index.html', 'css/app.css', 'icon.svg', 'manifest.webmanifest', 'js/app.js', 'js/store.js', 'js/util.js', 'js/cards.js', 'js/rich.js', 'js/table.js', 'js/sketch.js', 'js/ui.js', 'js/actions.js', 'js/exporter.js', 'js/templates.js'];
+const V = 'board228-v2';
+const SHELL = ['./', 'index.html', 'css/app.css', 'icon.svg', 'manifest.webmanifest', 'js/app.js', 'js/store.js', 'js/util.js', 'js/cards.js', 'js/rich.js', 'js/table.js', 'js/sketch.js', 'js/ui.js', 'js/actions.js', 'js/exporter.js', 'js/templates.js', 'js/sync.js', 'js/config.js'];
 self.addEventListener('install', e => e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {

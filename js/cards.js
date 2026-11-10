@@ -71,7 +71,7 @@ const B = {
     const t = realBoard(el) || el, cnt = el.alias && !get(el.alias) ? null : all().filter(e => e.board === t.id && e.loc !== 'trash').length;
     const bg = t.color || '#0a84ff';
     n.append(h('div.tile', { style: { background: bg, color: inkOn(bg) } }, h('span.emo', t.icon || autoIcon(t.title)),
-      el.alias ? h('i.badge', { title: 'Verknüpfung' }, ico(get(el.alias) ? 'ext' : 'collapse', 12)) : null, t.shared ? h('i.badge.b2', { title: 'Geteilt' }, ico(t.shared === 'view' ? 'eye' : 'user', 12)) : null),
+      el.alias ? h('i.badge', { title: 'Verknüpfung' }, ico(get(el.alias) ? 'ext' : 'collapse', 12)) : null, t.space ? h('i.badge.b2', { title: 'Geteilt' }, ico(A.spaceInfo?.(t.space)?.view ? 'eye' : 'user', 12)) : null),
       el.alias ? h('div.btitle', get(el.alias) ? t.title || 'Ohne Titel' : 'Kein Zugriff mehr') : field(el, 'title', { ph: 'Neues Board', cls: 'btitle' }),
       h('div.bcount', t.template ? h('b.tplb', 'Vorlage') : cnt == null ? '' : cnt === 1 ? '1 Karte' : cnt + ' Karten'));
   },
@@ -150,6 +150,7 @@ export function sig(el) {
   if (el.type === 'column') s += '|' + colKids(el.id).length;
   if (el.type === 'note' && el.sync) s += '|' + all().filter(o => o.sync === el.sync).map(o => o.board + o.loc).join();
   const pins = all().filter(c => c.pin === el.id && c.loc !== 'trash'); if (pins.length) s += '|p' + pins.map(p => p.modified).join();
+  if (A.rxOf) s += '|x' + JSON.stringify(A.rxOf(el)) + (A.activity?.(el.id) ? 'a' : '');
   if (el.labels?.length) s += '|l' + el.labels.map(id => (kv('labels', {})[id] || {}).name + (kv('labels', {})[id] || {}).color).join();
   return s;
 }
@@ -165,7 +166,7 @@ export function build(el) {
   // Labels, Reaktionen, angeheftete Kommentare
   const L = kv('labels', {});
   if (el.labels?.length) n.append(h('div.labels.nodrag', el.labels.filter(id => L[id]).map(id => h('span.label', { style: { background: L[id].color }, data: { label: id }, tabindex: 0, onclick: e => { e.stopPropagation(); A.labelClick(el, id, e); }, ondblclick: e => { e.stopPropagation(); A.labelRename(id); } }, L[id].name))));
-  const r = rx(el.reactions, emo => tx(() => set(el.id, { reactions: toggleRx(get(el.id).reactions, emo) }))); if (r) n.append(r);
+  const r = rx(A.rxOf ? A.rxOf(el) : el.reactions, emo => (A.role === 'comment' && A.remoteRx ? A.remoteRx(el.id, emo) : tx(() => set(el.id, { reactions: toggleRx(get(el.id).reactions, emo) })))); if (r) n.append(r);
   const pins = all().filter(cm => cm.pin === el.id && cm.loc !== 'trash');
   if (pins.length && !A.hideComments()) n.append(h('div.pins.nodrag', pins.map(p => h('button.pinb', { title: 'Kommentar', data: { pin: p.id }, onclick: e => { e.stopPropagation(); A.openPin(p.id, e.currentTarget); } }, ico('comment', 13), (p.thread || []).length || ''))));
   if (el.locked) n.append(h('i.lockb', { title: 'Position gesperrt' }, ico('lock', 11)));

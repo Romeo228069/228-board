@@ -73,6 +73,7 @@ function refreshTop() {
     h('button.ib', { title: 'Ansicht', 'aria-label': 'Ansicht', onclick: viewMenu }, ico('eye')),
     A.board !== 'home' ? h('button.ib', { title: 'Exportieren', 'aria-label': 'Exportieren', onclick: exportMenu }, ico('export')) : null,
     A.board !== 'home' ? h('button.btn.primary.share', { onclick: () => A.share() }, ico('share', 16), h('span', 'Teilen')) : null,
+    A.topExtra?.(),
     h('button.ib', { title: 'Einstellungen', 'aria-label': 'Einstellungen', onclick: () => A.settings() }, ico('gear')));
 }
 function viewMenu(e) {
@@ -175,11 +176,11 @@ export function refreshUI(force) {
   refreshTop();
   const tools = $('#tools'), els = A.selEls(), ed = A.editing, ro = A.readonly();
   const mode = ro ? 'ro' : ed?.dataset.rich ? 'text' : els.length ? 'sel' : 'def';
-  const sig = mode + '|' + els.map(e => e.id + e.modified).join() + (table.T.id || '') + (force ? Math.random() : '');
-  tools.hidden = ro; document.body.classList.toggle('readonly', ro);
+  const sig = mode + (A.role || '') + '|' + els.map(e => e.id + e.modified).join() + (table.T.id || '') + (force ? Math.random() : '');
+  const cm = ro && A.role === 'comment' && !A.mode.present; tools.hidden = ro && !cm; document.body.classList.toggle('readonly', ro); document.body.classList.toggle('viewer', A.role === 'view');
   if (sig !== uiSig) { uiSig = sig; tools.innerHTML = ''; tools.dataset.mode = mode;
     if (mode !== 'def' && mode !== 'ro') tools.append(h('button.tb.backb', { title: 'Zurück zu den Werkzeugen', ...keep(() => { A.stopEdit(); A.select([]); }) }, ico('back'), h('span', 'Fertig')));
-    tools.append(...(mode === 'text' ? toolsText() : mode === 'sel' ? toolsSel(els) : mode === 'def' ? toolsDefault() : []).flat().filter(Boolean)); }
+    tools.append(...(mode === 'text' ? toolsText() : mode === 'sel' ? toolsSel(els) : mode === 'def' ? toolsDefault() : cm ? [btn('comment', 'Kommentar', () => A.create('comment')), btn('draw', 'Zeichnen', () => A.drawMode()), els.length ? btn('smile', 'Reaktion', e => A.pop(h('div.emo', EMOJI.map(em => h('button', { onclick: () => { els.forEach(x => A.remoteRx(x.id, em)); A.closeMenu(); } }, em))), ...at(e))) : null] : []).flat().filter(Boolean)); }
   const tr = all().filter(e => e.loc === 'trash').length; $('#trashBtn').classList.toggle('full', tr > 0); $('#trashBtn').hidden = ro;
   if (!$('#trash').hidden) drawTrash();
   $('#untitle').textContent = 'Ablage · ' + kids(A.board, 'unsorted').length;
@@ -202,7 +203,7 @@ function toolDrag() {
 /* ---------- Rechtsklick ---------- */
 A.ctxMenu = (x, y) => {
   const els = A.selEls(), ids = els.map(e => e.id), one = els.length === 1 ? els[0] : null, ro = A.readonly(), pt = A.toWorld(x, y), m = [];
-  if (ro) { if (els.length) m.push({ label: 'Kopieren', icon: 'dup', act: () => A.act('copy') }); if (one && ['image', 'file'].includes(one.type)) m.push({ label: 'Herunterladen', icon: 'dl', act: () => A.act('download', ids) }); return m.length && A.menu(m, x, y); }
+  if (ro) { if (els.length) m.push({ label: 'Kopieren', icon: 'dup', act: () => A.act('copy') }); if (one && ['image', 'file'].includes(one.type) && A.spaceInfo?.(path(A.board)[0]?.id)?.downloads !== false) m.push({ label: 'Herunterladen', icon: 'dl', act: () => A.act('download', ids) }); return m.length && A.menu(m, x, y); }
   if (!els.length) return A.menu([{ label: 'Einfügen', icon: 'note', hint: K + 'V', act: () => A.act('paste', [], pt) }, '-', ...TOOLS.slice(0, 8).map(([t, l]) => ({ label: l, icon: t, act: () => A.create(t, pt, {}, { corner: true }) })), '-', { label: 'Alles auswählen', hint: K + 'A', act: () => A.select(kids(A.board).map(e => e.id)) }, { label: 'Alles einpassen', hint: 'Z', icon: 'fit', act: () => A.fit() }], x, y);
   if (els.every(e => e.loc === 'trash')) return A.menu([{ label: 'Wiederherstellen', icon: 'undo', act: () => A.act('restore', ids) }, { label: 'Hier ablegen', act: () => A.act('restore', ids, A.center()) }, { label: 'Endgültig löschen', danger: true, icon: 'trash', act: () => A.act('emptyTrash', ids) }], x, y);
   m.push({ label: 'Kopieren', hint: K + 'C', act: () => A.act('copy') }, { label: 'Ausschneiden', hint: K + 'X', act: () => A.act('cut') }, { label: 'Einfügen', hint: K + 'V', act: () => A.act('paste', [], pt) }, { label: 'Duplizieren', hint: K + 'D', icon: 'dup', act: () => A.act('duplicate', ids) });
@@ -257,7 +258,7 @@ A.search = (q0 = '') => {
   const snippet = e => e.title || e.name || e.caption || e.url || textOf(e.html || '').trim().slice(0, 140) || (e.items || []).map(i => i.text).join(' · ').slice(0, 140) || (e.thread || []).map(m => textOf(m.html)).join(' · ').slice(0, 140) || (e.cells || []).flat().filter(Boolean).join(' · ').slice(0, 140) || e.label || '';
   const hay = e => [e.title, e.name, e.caption, e.url, e.desc, e.label, e.hex, textOf(e.html || ''), (e.items || []).map(i => i.text + ' ' + (i.who || '')).join(' '), (e.thread || []).map(m => textOf(m.html)).join(' '), (e.cells || []).flat().join(' '), (e.labels || []).map(l => 'label:' + (kv('labels', {})[l]?.name || '')).join(' ')].join(' ').toLowerCase();
   const draw = () => { const q = inp.value.trim().toLowerCase(), words = q.split(/\s+/).filter(Boolean), rec = kv('recent', []); res.innerHTML = '';
-    let list = all().filter(e => e.id !== 'home' && e.loc !== 'trash' && e.type !== 'line' && !e.alias && (scope === 'all' || path(e.board).some(p => p.id === A.board)) && (!shared || path(e.board).some(p => p.shared)));
+    let list = all().filter(e => e.id !== 'home' && e.loc !== 'trash' && e.type !== 'line' && !e.alias && (scope === 'all' || path(e.board).some(p => p.id === A.board)) && (!shared || e.space || path(e.board).some(p => p.space)));
     if (!q) list = list.filter(e => e.type === 'board').sort((a, b) => (rec.indexOf(a.id) < 0 ? 1e9 : rec.indexOf(a.id)) - (rec.indexOf(b.id) < 0 ? 1e9 : rec.indexOf(b.id))).slice(0, 12);
     else list = list.filter(e => { const t = hay(e); return words.every(w => t.includes(w)); }).sort((a, b) => (b.type === 'board') - (a.type === 'board') || (sort === 'modified' ? b.modified - a.modified : (rec.indexOf(a.board) < 0 ? 1e9 : rec.indexOf(a.board)) - (rec.indexOf(b.board) < 0 ? 1e9 : rec.indexOf(b.board)) || b.modified - a.modified)).slice(0, 80);
     res.append(h('div.mtitle', q ? list.length + ' Treffer' : 'Zuletzt besucht'));
@@ -357,6 +358,7 @@ A.share = () => { const b = get(A.board), url = location.origin + location.pathn
 A.settings = () => { const tog = (label, key, def, hint) => h('label.setrow', h('span', label, hint ? h('small', hint) : null), h('input.switch', { type: 'checkbox', checked: A.setting(key, def) || null, onchange: e => { A.setSetting(key, e.target.checked); $('#cards').innerHTML = ''; A.render(); } }));
   const sel = (label, key, def, opts) => h('label.setrow', h('span', label), h('select.field', { onchange: e => { const v = e.target.value; A.setSetting(key, isNaN(v) || v === '' ? (v === 'true' ? true : v === 'false' ? false : v) : +v); A.render(); } }, opts.map(([v, l]) => h('option', { value: v, selected: String(A.setting(key, def)) === String(v) || null }, l))));
   A.modal('Einstellungen', h('div.settings',
+    A.account ? h('div.setrow', h('span', 'Konto und Abgleich', h('small', 'Boards auf allen Geräten, Teilen, gemeinsames Arbeiten')), h('button.btn', { onclick: () => A.account() }, 'Konto')) : null,
     h('h3', 'Profil'), h('label.setrow', h('span', 'Mein Name', h('small', 'Erscheint an Kommentaren, Reaktionen und Aufgaben')), h('input.field', { value: A.me(), onchange: e => { kvSet('me', e.target.value.trim() || 'Ich'); A.render(); }, onkeydown: e => e.stopPropagation() })),
     h('h3', 'Darstellung'), sel('Erscheinungsbild', 'dark', 'auto', [['auto', 'Wie das System'], ['false', 'Hell'], ['true', 'Dunkel']]), sel('Größe der Oberfläche', 'uiSize', 1, [[0, 'Klein'], [1, 'Normal'], [2, 'Groß'], [3, 'Sehr groß']]), tog('Serifenlose Überschriften', 'sans', true), sel('Zeitformat', 'h12', false, [['false', '24 Stunden'], ['true', '12 Stunden']]), sel('Währung in Tabellen', 'currency', 'EUR', [['EUR', 'Euro'], ['USD', 'US-Dollar'], ['GBP', 'Pfund'], ['CHF', 'Franken'], ['XOF', 'CFA-Franc']]),
     h('h3', 'Leinwand'), tog('Punktraster anzeigen', 'showGrid', true), tog('Am Raster einrasten', 'snap', true), sel('Rastergröße', 'gridSize', 1, [[0, 'Fein'], [1, 'Mittel'], [2, 'Grob']]), tog('Überlappen verhindern', 'noOverlap', true, 'Wachsende Karten schieben darunterliegende nach unten'), tog('Hinweise anzeigen', 'helpers', true), tog('Tinteneffekt beim Zeichnen', 'ink', true),

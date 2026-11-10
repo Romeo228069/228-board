@@ -72,7 +72,7 @@ export const all = () => [...S.els.values()];
 export const kids = (board, loc = 'canvas') => all().filter(e => e.board === board && e.loc === loc && !e.col);
 export const colKids = col => all().filter(e => e.col === col && e.loc !== 'trash').sort((a, b) => (a.ord || 0) - (b.ord || 0));
 export const realBoard = el => (el && el.alias ? get(el.alias) : el);
-export function path(id) { const p = []; let e = get(id), n = 0; while (e && n++ < 50) { p.unshift(e); e = get(e.board); } return p; }
+export function path(id) { const p = []; let e = get(id), n = 0; while (e && n++ < 50) { p.unshift(e); if (e.loc === 'root' && e.id !== 'home') { const al = all().find(a => a.alias === e.id && a.loc !== 'trash'); e = al ? get(al.board) : null; } else e = get(e.board); } return p; }
 export function descendants(boardId, out = []) {
   for (const e of all()) if (e.board === boardId) { out.push(e); if (e.type === 'board' && !e.alias) descendants(e.id, out); }
   return out;
@@ -101,10 +101,11 @@ export function cloneEls(list, patch = {}) {
 }
 
 // Dateien
-const urls = new Map();
+const urls = new Map(), pending = {};
 export async function putBlob(blob) { const id = 'b' + uid(); await req(db.transaction('blobs', 'readwrite').objectStore('blobs').put(blob, id)); urls.set(id, URL.createObjectURL(blob)); return id; }
 export const getBlob = id => req(db.transaction('blobs').objectStore('blobs').get(id));
-export async function blobUrl(id) { if (!id) return ''; if (/^(https?:|data:|blob:)/.test(id)) return id; if (urls.has(id)) return urls.get(id); const b = await getBlob(id); if (!b) return ''; const u = URL.createObjectURL(b); urls.set(id, u); return u; }
+export async function putBlobAs(id, blob) { await req(db.transaction('blobs', 'readwrite').objectStore('blobs').put(blob, id)); urls.set(id, URL.createObjectURL(blob)); }
+export async function blobUrl(id) { if (!id) return ''; if (/^(https?:|data:|blob:)/.test(id)) return id; if (urls.has(id)) return urls.get(id); let b = await getBlob(id); if (!b && S.blobFetch) { b = await (pending[id] ??= S.blobFetch(id)); delete pending[id]; if (urls.has(id)) return urls.get(id); } if (!b) return ''; const u = URL.createObjectURL(b); urls.set(id, u); return u; }
 export const blobUrlNow = id => (/^(https?:|data:|blob:)/.test(id || '') ? id : urls.get(id) || '');
 export function delBlob(id) { if (id && id[0] === 'b') db.transaction('blobs', 'readwrite').objectStore('blobs').delete(id); }
 export async function dump() {

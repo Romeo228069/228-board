@@ -1,0 +1,78 @@
+rules_version = '2';
+// 228 Board: jeder Bereich (space) ist entweder der private Bereich eines Kontos
+// (ID = Konto-ID) oder ein geteiltes Board samt Unterboards (ID = Board-ID).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function mail() { return request.auth.token.email != null ? request.auth.token.email.lower() : null; }
+    function sp(sid) { return get(/databases/$(database)/documents/spaces/$(sid)).data; }
+    function priv(sid) { return get(/databases/$(database)/documents/spaces/$(sid)/private/cfg).data; }
+    function isOwner(sid) { return signedIn() && sp(sid).owner == request.auth.uid; }
+    function isEditor(sid) { return signedIn() && (sp(sid).owner == request.auth.uid || (mail() != null && mail() in sp(sid).editors)); }
+    function passOk(sid) { return sp(sid).pw != true || exists(/databases/$(database)/documents/spaces/$(sid)/pass/$(request.auth.uid)); }
+    function canView(sid) { return isEditor(sid) || (signedIn() && sp(sid).view == true && passOk(sid)); }
+    function canComment(sid) { return isEditor(sid) || (canView(sid) && sp(sid).comments == true && mail() != null); }
+
+    match /spaces/{sid} {
+      allow get: if signedIn();
+      allow list: if signedIn() && (resource.data.owner == request.auth.uid || (mail() != null && mail() in resource.data.editors));
+      allow create: if signedIn() && mail() != null && request.resource.data.owner == request.auth.uid;
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
+      allow update: if signedIn() && (
+        resource.data.owner == request.auth.uid
+        // Bearbeiter dürfen einladen und sich selbst austragen, aber weder Besitz noch Links ändern
+        || (mail() != null && mail() in resource.data.editors
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['editors', 'names', 'title']))
+        // Beitritt über Einladungslink: genau die eigene Adresse kommt hinzu
+        || (mail() != null && exists(/databases/$(database)/documents/spaces/$(sid)/join/$(request.auth.uid))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['editors', 'names'])
+            && request.resource.data.editors.hasAll(resource.data.editors)
+            && request.resource.data.editors.size() == resource.data.editors.size() + 1
+            && mail() in request.resource.data.editors)
+      );
+
+      match /private/{d} { allow read, write: if isOwner(sid); }
+      match /pass/{uid} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create, update: if signedIn() && request.auth.uid == uid && priv(sid).pwHash != null && request.resource.data.h == priv(sid).pwHash;
+      }
+      match /join/{uid} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create, update: if signedIn() && request.auth.uid == uid && priv(sid).editToken != null && request.resource.data.t == priv(sid).editToken;
+      }
+      match /els/{id} {
+        allow read: if canView(sid);
+        allow create: if isEditor(sid) || (canComment(sid) && request.resource.data.t in ['comment', 'sketch'] && request.resource.data.by == request.auth.uid);
+        allow update: if isEditor(sid) || (canComment(sid) && resource.data.t == 'comment' && request.resource.data.t == 'comment');
+        allow delete: if isEditor(sid) || (canComment(sid) && resource.data.by == request.auth.uid && resource.data.t in ['comment', 'sketch']);
+      }
+      match /blobs/{b} {
+        allow read: if canView(sid);
+        allow write: if isEditor(sid);
+        match /chunks/{c} { allow read: if canView(sid); allow write: if isEditor(sid); }
+      }
+      match /rx/{r} {
+        allow read: if canView(sid);
+        allow create, update: if canComment(sid) && request.resource.data.uid == request.auth.uid;
+        allow delete: if canComment(sid) && resource.data.uid == request.auth.uid;
+      }
+      match /presence/{uid} {
+        allow read: if canView(sid);
+        allow write: if canView(sid) && request.auth.uid == uid;
+      }
+      match /views/{uid} {
+        allow read: if isOwner(sid);
+        allow create, update: if canView(sid) && request.auth.uid == uid;
+      }
+    }
+    // Mitteilungen an eine E-Mail-Adresse: jeder Angemeldete darf schreiben, nur die Person selbst lesen
+    match /inbox/{em}/items/{i} {
+      allow create: if signedIn() && mail() != null && request.resource.data.text is string && request.resource.data.text.size() < 600;
+      allow read, update, delete: if signedIn() && mail() == em;
+    }
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+  }
+}

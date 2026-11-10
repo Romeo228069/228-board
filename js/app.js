@@ -7,6 +7,7 @@ import * as table from './table.js';
 import { openPad } from './sketch.js';
 import { initUI, refreshUI } from './ui.js';
 import { initActions } from './actions.js';
+import { initSync } from './sync.js';
 
 const stage = $('#stage'), world = $('#world'), cards = $('#cards'), svg = $('#lines'), labels = $('#labels'), marq = $('#marquee');
 const V = (A.view = { x: 0, y: 0, z: 1 });
@@ -82,7 +83,7 @@ A.render = function render() {
   stage.classList.toggle('darkbg', !!b.bg && parseInt(b.bg.slice(1, 3), 16) * 0.3 + parseInt(b.bg.slice(3, 5), 16) * 0.59 + parseInt(b.bg.slice(5, 7), 16) * 0.11 < 110);
   for (const id of [...A.sel]) if (!get(id) || get(id).loc === 'trash') A.sel.delete(id);
   $$('.el.sel').forEach(n => !A.sel.has(n.dataset.id) && n.classList.remove('sel')); A.sel.forEach(id => $$(`.el[data-id="${id}"]`).forEach(n => n.classList.add('sel')));
-  drawLines(); refreshUI();
+  drawLines(); A.paintPeers?.(); refreshUI();
 };
 A.rebuild = (id, focus) => { const n = node(id); if (n) n._force = true; if (A.editing && n?.contains(A.editing)) { const ed = A.editing; A.editing = null; ed._commit?.(ed); } A.render(); if (focus) { const t = node(id)?.querySelector(focus.sel); if (t) A.startEdit(t, null, focus.pos); } };
 A.select = (ids, add) => { if (!add) A.sel.clear(); ids.forEach(i => A.sel.add(i)); if (table.T.id && !A.sel.has(table.T.id)) table.clearSel(); $$('.el.sel').forEach(n => !A.sel.has(n.dataset.id) && n.classList.remove('sel')); A.sel.forEach(id => $$(`.el[data-id="${id}"]`).forEach(n => n.classList.add('sel'))); drawLines(); refreshUI(); };
@@ -213,7 +214,7 @@ A.pickFile = (accept, cb, multi) => { const i = h('input', { type: 'file', accep
 /* Navigation */
 A.openBoard = (id, focusEl, noHist) => {
   const b = realBoard(get(id)); if (!b || b.type !== 'board') return A.toast('Dieses Board ist nicht mehr verfügbar');
-  A.stopEdit(); A.closePin?.(); table.clearSel(); A.board = b.id; A.sel.clear();
+  A.stopEdit(); A.closePin?.(); table.clearSel(); A.board = b.id; A.sel.clear(); A.role = A.roleFor?.(b.id) || 'edit';
   if (!noHist) { A.hist = A.hist.slice(0, A.hpos + 1); A.hist.push(b.id); A.hpos = A.hist.length - 1; }
   const rec = kv('recent', []).filter(x => x !== b.id); rec.unshift(b.id); kvSet('recent', rec.slice(0, 30));
   if (location.hash !== '#/b/' + b.id) history.replaceState(null, '', '#/b/' + b.id);
@@ -225,7 +226,7 @@ A.openBoard = (id, focusEl, noHist) => {
 };
 A.back = () => { if (A.hpos > 0) A.openBoard(A.hist[--A.hpos], null, true); };
 A.forward = () => { if (A.hpos < A.hist.length - 1) A.openBoard(A.hist[++A.hpos], null, true); };
-A.up = () => { const p = get(A.board)?.board; if (p) A.openBoard(p); };
+A.up = () => { const p = path(A.board); if (p.length > 1) A.openBoard(p[p.length - 2].id); };
 
 /* Zeiger */
 const ptrs = new Map(); let G = null, spaceDown = false, spacePanned = false, lastPt = [0, 0], holdT = null, pressT = null;
@@ -426,7 +427,7 @@ stage.addEventListener('wheel', e => { if (e.target.closest('.tbl-wrap,.dprev') 
 
 /* Freies Zeichnen auf dem Board */
 A.drawMode = () => {
-  if (A.pad || A.readonly()) return; A.stopEdit(); A.select([]);
+  if (A.pad || (A.readonly() && !(A.role === 'comment' && !A.mode.present))) return; A.stopEdit(); A.select([]);
   const host = h('div#drawlayer'); world.append(host); stage.classList.add('drawing');
   openPad({ host, toWorld: e => A.toWorld(e.clientX, e.clientY), scale: () => 1, onDone: strokes => { host.remove(); stage.classList.remove('drawing'); if (!strokes?.length) return;
     let b = [1e9, 1e9, -1e9, -1e9]; strokes.forEach(s => s.pts.forEach(p => { b = [Math.min(b[0], p[0] - s.size), Math.min(b[1], p[1] - s.size), Math.max(b[2], p[0] + s.size), Math.max(b[3], p[1] + s.size)]; }));
@@ -528,7 +529,7 @@ addEventListener('drop', async e => {
 });
 
 /* Start */
-addEventListener('hashchange', () => { const m = /#\/b\/([\w-]+)/.exec(location.hash); if (m && m[1] !== A.board && get(m[1])) A.openBoard(m[1]); });
+addEventListener('hashchange', () => { const m = /#\/(?:b|v|j)\/([\w-]+)/.exec(location.hash); if (!m || m[1] === A.board) return; if (get(m[1]) && !/#\/j\//.test(location.hash)) A.openBoard(m[1]); else A.openRemote?.(location.hash); });
 addEventListener('resize', () => applyView());
 addEventListener('beforeunload', e => { A.stopEdit(); });
 (async () => {
@@ -536,11 +537,15 @@ addEventListener('beforeunload', e => { A.stopEdit(); });
   try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch {}
   S.subs.add(() => A.render());
   initActions(); initUI(); applySettings();
-  const m = /#\/b\/([\w-]+)/.exec(location.hash);
+  const h0 = location.hash, m = /#\/(?:b|v|j)\/([\w-]+)/.exec(h0);
   A.openBoard(m && get(m[1]) ? m[1] : 'home');
+  initSync().then(() => { if (m && (!get(m[1]) || /#\/j\//.test(h0))) setTimeout(() => A.openRemote?.(h0), 1200); });
   if (!kv('seeded')) { kvSet('seeded', 1); A.welcome?.(); }
-  const sp = new URLSearchParams(location.search), shared = sp.get('url') || sp.get('text') || sp.get('title');
-  if (shared) { const u = [sp.get('url'), sp.get('text')].find(x => x && isUrl(x.trim())); tx(() => add({ id: uid(), board: 'home', loc: 'unsorted', ...(u ? { type: 'link', url: fixUrl(u), title: sp.get('title') || '', w: 280, showImg: true, showDesc: true } : { type: 'note', w: 260, html: `<p>${esc([sp.get('title'), sp.get('text')].filter(Boolean).join(' – '))}</p>` }) })); history.replaceState(null, '', location.pathname + location.hash); A.openBoard('home'); A.toggleUnsorted(true); }
+  const sp = new URLSearchParams(location.search), shared = sp.get('url') || sp.get('text') || sp.get('title') || sp.get('img');
+  if (shared) { const u = [sp.get('url'), sp.get('text')].find(x => x && isUrl(x.trim())), img = sp.get('img'), src = sp.get('src') || null, base = { id: uid(), board: 'home', loc: 'unsorted' };
+    tx(() => add(img ? { ...base, type: 'image', src: img, w: 320, caption: sp.get('title') || '', srcUrl: src } : u ? { ...base, type: 'link', url: fixUrl(u), title: sp.get('title') || '', w: 280, showImg: true, showDesc: true } : { ...base, type: 'note', w: 260, src, html: `<p>${esc(sp.get('text') || sp.get('title') || '')}</p>` }));
+    history.replaceState(null, '', location.pathname + location.hash); A.openBoard('home'); A.toggleUnsorted(true);
+    if (sp.get('clip')) { A.toast('In der Ablage gespeichert'); setTimeout(() => { if (!A.account || window.opener === null) window.close(); }, 2600); } }
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   document.body.classList.add('ready');
 })();
